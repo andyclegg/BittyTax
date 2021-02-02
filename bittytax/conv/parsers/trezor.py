@@ -3,6 +3,7 @@
 
 import re
 from decimal import Decimal
+from os.path import basename
 
 from ...config import config
 from ..out_record import TransactionOutRecord
@@ -95,6 +96,39 @@ def parse_trezor2(data_row, parser, filename):
     else:
         raise UnexpectedTypeError(4, parser.in_header[4], in_row[4])
 
+def parse_trezor_suite(data_row, parser, filename):
+    in_row = data_row.in_row
+    data_row.timestamp = DataParser.parse_timestamp(in_row[0].replace(', ', 'T'))
+
+    if not config.args.cryptoasset:
+        # if filename is as exported, we can parse out the symbol from the name
+        match_result = re.match('export-([a-z]+)-[0-9]+.csv', basename(filename))
+        if match_result:
+            symbol = match_result.groups()[0].upper()
+        else:
+            raise UnknownCryptoassetError
+    else:
+        symbol = config.args.cryptoasset
+
+    if in_row[1] == "RECV":
+        data_row.t_record = TransactionOutRecord(TransactionOutRecord.TYPE_DEPOSIT,
+                                                 data_row.timestamp,
+                                                 buy_quantity=in_row[5],
+                                                 buy_asset=symbol,
+                                                 #fee_quantity=Decimal(in_row[4]),
+                                                 #fee_asset=symbol,
+                                                 wallet=WALLET)
+    elif in_row[1] == "SENT":
+        data_row.t_record = TransactionOutRecord(TransactionOutRecord.TYPE_WITHDRAWAL,
+                                                 data_row.timestamp,
+                                                 sell_quantity=in_row[5],
+                                                 sell_asset=symbol,
+                                                 fee_quantity=Decimal(in_row[4]),
+                                                 fee_asset=symbol,
+                                                 wallet=WALLET)
+    else:
+        raise UnexpectedTypeError(1, parser.in_header[1], in_row[1])
+
 DataParser(DataParser.TYPE_WALLET,
            "Trezor",
            ['Date', 'Time', 'TX id', 'Address', 'Address Label', 'TX type', 'Value', 'TX total',
@@ -108,3 +142,10 @@ DataParser(DataParser.TYPE_WALLET,
             'Balance'],
            worksheet_name="Trezor",
            row_handler=parse_trezor2)
+
+# Trezor Suite format
+DataParser(DataParser.TYPE_WALLET,
+           "Trezor",
+           ['Date & Time', 'Type', 'Transaction ID', 'Addresses', 'Fee', 'Total'],
+           worksheet_name="Trezor",
+           row_handler=parse_trezor_suite)
